@@ -320,6 +320,14 @@ DELETE_ORGINAL_APK() {
 
 # 合入MOD
 PATCH_APK() {
+    # 调试：显示MOD补丁目录结构
+    echo "=== 调试：JMBQ目录结构 ==="
+    ls -la "${DOWNLOAD_DIR}/JMBQ"
+    echo "=== 文件列表 ==="
+    find "${DOWNLOAD_DIR}/JMBQ" -type f | head -30
+    echo "=== 目录列表 ==="
+    find "${DOWNLOAD_DIR}/JMBQ" -type d | head -30
+
     echo "正在合入MOD补丁..."
     
     # 1. 复制assets文件夹（如果存在）
@@ -462,18 +470,6 @@ PATCH_APK() {
     fi
     
     echo "补丁完成。"
-}
-
-# 显示MOD补丁结构
-SHOW_MOD_STRUCTURE() {
-    echo "=== MOD补丁目录结构 ==="
-    find "${DOWNLOAD_DIR}/JMBQ" -type f -name "*.smali" | head -20
-    echo ""
-    echo "=== 目录列表 ==="
-    ls -la "${DOWNLOAD_DIR}/JMBQ/"
-    if [ -d "${DOWNLOAD_DIR}/JMBQ" ]; then
-        find "${DOWNLOAD_DIR}/JMBQ" -type d | head -30
-    fi
 }
 
 # 打包APK
@@ -675,7 +671,6 @@ main() {
         # APK构建流程
         DOWNLOAD_APKTOOL
         DOWNLOAD_MOD_MENU
-        SHOW_MOD_STRUCTURE
         DOWNLOAD_APK
         VERIFY_APK
         DECODE_APK
