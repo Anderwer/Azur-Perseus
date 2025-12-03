@@ -319,67 +319,6 @@ DELETE_ORGINAL_APK() {
 }
 
 # 合入MOD
-<< patch
-PATCH_APK() {
-    echo "正在合入MOD补丁..."
-    cp -r "${DOWNLOAD_DIR}/JMBQ/assets/." "${DOWNLOAD_DIR}/DECODE_Output/assets/"
-    if [ $? -ne 0 ]; then
-        echo "错误: 复制资源文件失败！"
-        exit 1
-    fi
-    echo "复制资源文件完成"
-
-    local MAX_CLASS_NUM=$(find "${DOWNLOAD_DIR}/DECODE_Output/" -maxdepth 1 -type d -name "smali_classes*" 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
-    MAX_CLASS_NUM=${MAX_CLASS_NUM:-3}
-    local NEW_CLASS_NUM=$((MAX_CLASS_NUM + 1))
-    local NEW_SMALI_DIR="smali_classes${NEW_CLASS_NUM}"
-    local SRC_DIR=$(find "${DOWNLOAD_DIR}/JMBQ" -maxdepth 1 -type d -name "smali_classes*")
-
-    if [ -z "${SRC_DIR}" ]; then
-        echo "错误: MOD 补丁目录中未找到 smali_classes 目录！"
-        exit 1
-    fi
-
-    cp -r "${SRC_DIR}" "${DOWNLOAD_DIR}/DECODE_Output/${NEW_SMALI_DIR}" || {
-        echo "错误: 复制 smali 文件失败！"
-        exit 1
-    }
-    echo "smali文件复制完成"
-
-    local SMALI_FILE=$(find "${DOWNLOAD_DIR}/DECODE_Output" -type f -name "UnityPlayerActivity.smali")
-    if [ -z "${SMALI_FILE}" ]; then
-        echo "错误: UnityPlayerActivity.smali 文件未找到！"
-        exit 1
-    fi
-    echo "已找到 UnityPlayerActivity.smali 文件，路径为: ${SMALI_FILE}"
-
-    local LINE_NUM=$(grep -n ".method public constructor <init>()V" "${SMALI_FILE}" | cut -d: -f1)
-    [ -z "${LINE_NUM}" ] && {
-        echo "未找到构造函数"
-        exit 1
-    }
-
-    echo "正在修改 ${SMALI_FILE} 文件..."
-    sed -i -e "/\.method public constructor <init>()V/,/\.end method/{" \
-           -e "/\.locals 0/a\    invoke-static {}, Lcom/android/support/Main;->Start()V" \
-           -e "}" "${SMALI_FILE}" || {
-        echo "错误：添加smali代码失败，请检查文件路径、权限或文件内容格式。"
-        exit 1
-    }
-    echo "smali代码添加成功！"
-
-    echo "正在修改 AndroidManifest.xml 文件..."
-    local MANIFEST_FILE="${DOWNLOAD_DIR}/DECODE_Output/AndroidManifest.xml"
-    sed -i 's#</application>#    <service android:name="com.android.support.Launcher" android:enabled="true" android:exported="false" android:stopWithTask="true"/>\n    </application>\n    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>#' "${MANIFEST_FILE}" || {
-        echo "错误：修改 AndroidManifest.xml 文件失败，请检查文件路径、权限或文件内容格式。"
-        exit 1
-    }
-    echo "修改成功！"
-    echo "补丁完成。"
-}
-patch
-
-# 合入MOD
 PATCH_APK() {
     echo "正在合入MOD补丁..."
     
@@ -523,6 +462,18 @@ PATCH_APK() {
     fi
     
     echo "补丁完成。"
+}
+
+# 显示MOD补丁结构
+SHOW_MOD_STRUCTURE() {
+    echo "=== MOD补丁目录结构 ==="
+    find "${DOWNLOAD_DIR}/JMBQ" -type f -name "*.smali" | head -20
+    echo ""
+    echo "=== 目录列表 ==="
+    ls -la "${DOWNLOAD_DIR}/JMBQ/"
+    if [ -d "${DOWNLOAD_DIR}/JMBQ" ]; then
+        find "${DOWNLOAD_DIR}/JMBQ" -type d | head -30
+    fi
 }
 
 # 打包APK
