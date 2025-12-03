@@ -675,6 +675,7 @@ main() {
         # APK构建流程
         DOWNLOAD_APKTOOL
         DOWNLOAD_MOD_MENU
+        SHOW_MOD_STRUCTURE
         DOWNLOAD_APK
         VERIFY_APK
         DECODE_APK
