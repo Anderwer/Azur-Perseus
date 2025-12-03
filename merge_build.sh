@@ -175,7 +175,7 @@ DOWNLOAD_MOD_MENU() {
 # 下载APK（通用函数，根据构建类型执行不同的下载逻辑）
 DOWNLOAD_APK() {
     if [ "${BUILD_TYPE}" = "XAPK" ]; then
-        # XAPK模式下载逻辑
+        # XAPK模式下载逻辑保持不变
         echo "正在使用apkeep下载XAPK..."
         "${DOWNLOAD_DIR}/apkeep" -a "${GAME_BUNDLE_ID}" "${DOWNLOAD_DIR}/"
         if [ $? -ne 0 ]; then
@@ -193,12 +193,41 @@ DOWNLOAD_APK() {
     else
         # 普通APK模式下载逻辑
         APK_FILENAME="${GAME_SERVER}.apk"
+        echo "正在下载APK..."
         
         # 检查是否为Google Drive链接
         if echo "${APK_URL}" | grep -q "drive.google.com"; then
-            DOWNLOAD_FROM_GOOGLE_DRIVE
+            echo "检测到Google Drive链接，使用gdown下载..."
+            
+            # 提取文件ID
+            FILE_ID=$(echo "${APK_URL}" | sed -n 's/.*\/d\/\([^\/]*\)\/.*/\1/p')
+            if [ -z "${FILE_ID}" ]; then
+                FILE_ID=$(echo "${APK_URL}" | sed -n 's/.*id=\([^&]*\).*/\1/p')
+            fi
+            
+            if [ -z "${FILE_ID}" ]; then
+                echo "无法从Google Drive链接中提取文件ID"
+                exit 1
+            fi
+            
+            echo "提取的文件ID: ${FILE_ID}"
+            
+            # 使用gdown下载
+            if command -v gdown &> /dev/null; then
+                echo "使用gdown下载文件..."
+                gdown "https://drive.google.com/uc?id=${FILE_ID}" -O "${DOWNLOAD_DIR}/${APK_FILENAME}"
+                
+                if [ $? -ne 0 ]; then
+                    echo "gdown下载失败，尝试备用方法..."
+                    # 备用方法：使用带有确认处理的curl
+                    DOWNLOAD_FROM_GOOGLE_DRIVE_WITH_CONFIRMATION
+                fi
+            else
+                echo "gdown未安装，使用备用方法..."
+                DOWNLOAD_FROM_GOOGLE_DRIVE_WITH_CONFIRMATION
+            fi
         else
-            echo "正在下载APK..."
+            # 非Google Drive链接，直接下载
             curl -L -o "${DOWNLOAD_DIR}/${APK_FILENAME}" "${APK_URL}"
         fi
         
@@ -206,88 +235,29 @@ DOWNLOAD_APK() {
             echo "APK下载失败"
             exit 1
         fi
+        
+        # 验证下载的文件大小
+        FILE_SIZE=$(stat -c%s "${DOWNLOAD_DIR}/${APK_FILENAME}" 2>/dev/null || stat -f%z "${DOWNLOAD_DIR}/${APK_FILENAME}" 2>/dev/null)
+        echo "下载完成，文件大小: ${FILE_SIZE} 字节"
+        
+        if [ "${FILE_SIZE}" -lt 10485760 ]; then  # 小于10MB
+            echo "警告：下载的文件可能不是有效的APK文件（大小: ${FILE_SIZE} 字节）"
+            echo "文件前100个字符："
+            head -c 100 "${DOWNLOAD_DIR}/${APK_FILENAME}"
+            echo ""
+            
+            # 检查是否是HTML文件
+            if grep -q "<html\|<!DOCTYPE\|http-equiv\|Google Drive" "${DOWNLOAD_DIR}/${APK_FILENAME}" 2>/dev/null; then
+                echo "错误：下载的是HTML页面，不是APK文件"
+                echo "可能是Google Drive的病毒扫描警告页面"
+                echo "建议："
+                echo "1. 将文件上传到其他平台（如GitHub Releases）"
+                echo "2. 或者使用XAPK模式（如果支持）"
+                exit 1
+            fi
+        fi
+        
         echo "APK [${APK_FILENAME}] 下载完成"
-    fi
-}
-
-# Google Drive下载函数
-DOWNLOAD_FROM_GOOGLE_DRIVE() {
-    echo "检测到Google Drive链接，使用特殊方式下载..."
-    APK_FILENAME="${GAME_SERVER}.apk"
-    
-    # 从URL中提取文件ID
-    FILE_ID=$(echo "${APK_URL}" | sed -n 's/.*\/d\/\([^\/]*\)\/.*/\1/p')
-    if [ -z "${FILE_ID}" ]; then
-        FILE_ID=$(echo "${APK_URL}" | sed -n 's/.*id=\([^&]*\).*/\1/p')
-    fi
-    
-    if [ -z "${FILE_ID}" ]; then
-        echo "无法从Google Drive链接中提取文件ID"
-        exit 1
-    fi
-    
-    echo "提取的文件ID: ${FILE_ID}"
-    
-    # 方法1：使用wget（推荐，能处理大文件确认）
-    if command -v wget &> /dev/null; then
-        echo "使用wget下载Google Drive文件..."
-        wget --show-progress --quiet --save-cookies /tmp/cookies.txt \
-             "https://drive.google.com/uc?export=download&id=${FILE_ID}" -O- \
-             | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p' > /tmp/confirm.txt
-        
-        if [ -s /tmp/confirm.txt ]; then
-            CONFIRM=$(cat /tmp/confirm.txt)
-            echo "需要确认码: ${CONFIRM}"
-            wget --show-progress --load-cookies /tmp/cookies.txt \
-                 "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILE_ID}" \
-                 -O "${DOWNLOAD_DIR}/${APK_FILENAME}"
-        else
-            wget --show-progress --load-cookies /tmp/cookies.txt \
-                 "https://drive.google.com/uc?export=download&id=${FILE_ID}" \
-                 -O "${DOWNLOAD_DIR}/${APK_FILENAME}"
-        fi
-        
-        rm -f /tmp/cookies.txt /tmp/confirm.txt
-    # 方法2：使用curl（备用方案）
-    else
-        echo "使用curl下载Google Drive文件..."
-        # 获取cookie和确认token
-        COOKIES=$(curl -c /tmp/cookies.txt -s -L \
-                  "https://drive.google.com/uc?export=download&id=${FILE_ID}")
-        CONFIRM=$(echo "${COOKIES}" | grep -o "confirm=[^&]*" | cut -d'=' -f2)
-        
-        if [ -n "${CONFIRM}" ]; then
-            echo "需要确认码: ${CONFIRM}"
-            curl -L -b /tmp/cookies.txt \
-                 "https://drive.google.com/uc?export=download&confirm=${CONFIRM}&id=${FILE_ID}" \
-                 -o "${DOWNLOAD_DIR}/${APK_FILENAME}"
-        else
-            curl -L -b /tmp/cookies.txt \
-                 "https://drive.google.com/uc?export=download&id=${FILE_ID}" \
-                 -o "${DOWNLOAD_DIR}/${APK_FILENAME}"
-        fi
-        
-        rm -f /tmp/cookies.txt
-    fi
-    
-    if [ ! -f "${DOWNLOAD_DIR}/${APK_FILENAME}" ]; then
-        echo "Google Drive文件下载失败"
-        exit 1
-    fi
-    
-    # 检查下载的文件大小
-    FILE_SIZE=$(stat -c%s "${DOWNLOAD_DIR}/${APK_FILENAME}" 2>/dev/null || stat -f%z "${DOWNLOAD_DIR}/${APK_FILENAME}" 2>/dev/null)
-    echo "下载完成，文件大小: ${FILE_SIZE} 字节"
-    
-    if [ "${FILE_SIZE}" -lt 10240 ]; then  # 小于10KB可能是错误页面
-        echo "警告：下载的文件可能太小，检查是否为错误页面..."
-        if head -c 200 "${DOWNLOAD_DIR}/${APK_FILENAME}" | grep -q "Google Drive - Virus scan warning"; then
-            echo "错误：遇到了Google Drive病毒扫描警告页面"
-            echo "请尝试："
-            echo "1. 手动下载文件，然后上传到其他位置"
-            echo "2. 或者使用gdown工具"
-            exit 1
-        fi
     fi
 }
 
