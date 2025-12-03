@@ -20,6 +20,10 @@ jobs:
       contents: write
 
     steps:
+      # 安装 gdown
+      - name: Install Python dependencies
+        run: pip install gdown
+        
       # 步骤1：检出仓库代码
       - name: Checkout code
         uses: actions/checkout@v4
