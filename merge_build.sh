@@ -117,12 +117,21 @@ DOWNLOAD_MOD_MENU() {
     echo "正在下载MOD补丁..."
     local API_RESPONSE=$(curl -s "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest")
     local JMBQ_VERSION=$(echo "${API_RESPONSE}" | jq -r '.tag_name')
-    local DOWNLOAD_LINK=$(echo "${API_RESPONSE}" | jq -r '.assets[0].browser_download_url')
-
+    
+    # 查找MOD补丁文件（现在可能是RAR格式）
+    local DOWNLOAD_LINK=""
+    
+    # 首先尝试找MOD_MENU文件（可能是RAR或ZIP）
+    DOWNLOAD_LINK=$(echo "${API_RESPONSE}" | jq -r '.assets[] | select(.name | contains("MOD_MENU")) | .browser_download_url' | head -n 1)
+    
     if [ -z "${DOWNLOAD_LINK}" ] || [ "${DOWNLOAD_LINK}" == "null" ]; then
         echo "无法获取MOD Patch文件下载链接"
         exit 1
     fi
+    
+    # 获取实际的文件名
+    FILENAME=$(basename "${DOWNLOAD_LINK}")
+    echo "找到MOD补丁文件: ${FILENAME}"
 
     curl -L -o "${DOWNLOAD_DIR}/${FILENAME}" "${DOWNLOAD_LINK}"
     if [ $? -eq 0 ]; then
@@ -132,13 +141,74 @@ DOWNLOAD_MOD_MENU() {
         exit 1
     fi
 
-    unzip -q "${DOWNLOAD_DIR}/${FILENAME}" -d "${DOWNLOAD_DIR}/JMBQ"
-    if [ $? -ne 0 ]; then
-        echo "错误: 解压 ${FILENAME} 失败！"
+    # 创建JMBQ目录
+    rm -rf "${DOWNLOAD_DIR}/JMBQ"
+    mkdir -p "${DOWNLOAD_DIR}/JMBQ"
+    
+    # 根据文件类型解压
+    if [[ "${FILENAME}" == *.zip ]]; then
+        echo "解压ZIP文件..."
+        unzip -q "${DOWNLOAD_DIR}/${FILENAME}" -d "${DOWNLOAD_DIR}/JMBQ"
+        if [ $? -ne 0 ]; then
+            echo "错误: 解压ZIP文件失败！"
+            exit 1
+        fi
+    elif [[ "${FILENAME}" == *.rar ]]; then
+        echo "解压RAR文件..."
+        # 检查是否安装了unrar
+        if ! command -v unrar &> /dev/null; then
+            echo "安装unrar工具..."
+            if [[ "$(uname)" == "Linux" ]]; then
+                if command -v apt-get &> /dev/null; then
+                    sudo apt-get update && sudo apt-get install -y unrar
+                elif command -v yum &> /dev/null; then
+                    sudo yum install -y unrar
+                else
+                    echo "无法自动安装unrar，请手动安装"
+                    exit 1
+                fi
+            elif [[ "$(uname)" == "Darwin" ]]; then
+                brew install unrar
+            else
+                echo "不支持的系统"
+                exit 1
+            fi
+        fi
+        
+        # 解压RAR文件
+        unrar x -o+ "${DOWNLOAD_DIR}/${FILENAME}" "${DOWNLOAD_DIR}/JMBQ/"
+        if [ $? -ne 0 ]; then
+            echo "错误: 解压RAR文件失败！"
+            echo "尝试使用7z解压..."
+            if command -v 7z &> /dev/null; then
+                7z x "${DOWNLOAD_DIR}/${FILENAME}" -o"${DOWNLOAD_DIR}/JMBQ/"
+                if [ $? -ne 0 ]; then
+                    echo "错误: 7z解压也失败！"
+                    exit 1
+                fi
+            else
+                echo "请安装unrar或7z工具"
+                exit 1
+            fi
+        fi
+    else
+        echo "错误: 不支持的文件格式: ${FILENAME}"
         exit 1
     fi
 
     echo "JMBQ_VERSION=${JMBQ_VERSION}" >> "${GITHUB_ENV}"
+    echo "MOD补丁解压完成"
+    
+    # 显示解压后的目录结构
+    echo "=== MOD补丁解压后结构 ==="
+    ls -la "${DOWNLOAD_DIR}/JMBQ/"
+    if [ -d "${DOWNLOAD_DIR}/JMBQ" ]; then
+        find "${DOWNLOAD_DIR}/JMBQ" -type f | head -20
+        echo ""
+        echo "JMBQ子目录:"
+        find "${DOWNLOAD_DIR}/JMBQ" -type d | head -20
+    fi
+    echo "=== 结束目录结构显示 ==="
 }
 
 # 下载APK（通用函数，根据构建类型执行不同的下载逻辑）
