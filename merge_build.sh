@@ -319,6 +319,7 @@ DELETE_ORGINAL_APK() {
 }
 
 # 合入MOD
+<< patch
 PATCH_APK() {
     echo "正在合入MOD补丁..."
     cp -r "${DOWNLOAD_DIR}/JMBQ/assets/." "${DOWNLOAD_DIR}/DECODE_Output/assets/"
@@ -374,6 +375,153 @@ PATCH_APK() {
         exit 1
     }
     echo "修改成功！"
+    echo "补丁完成。"
+}
+patch
+
+# 合入MOD
+PATCH_APK() {
+    echo "正在合入MOD补丁..."
+    
+    # 1. 复制assets文件夹（如果存在）
+    if [ -d "${DOWNLOAD_DIR}/JMBQ/assets" ]; then
+        cp -r "${DOWNLOAD_DIR}/JMBQ/assets/." "${DOWNLOAD_DIR}/DECODE_Output/assets/"
+        echo "复制资源文件完成"
+    else
+        echo "警告：assets目录不存在，跳过资源文件复制"
+    fi
+
+    # 2. 查找smali目录
+    local SRC_DIR=""
+    
+    # 先尝试查找smali_classes目录
+    SRC_DIR=$(find "${DOWNLOAD_DIR}/JMBQ" -maxdepth 2 -type d -name "smali_classes*" | head -1)
+    
+    # 如果没有找到，尝试查找smali目录
+    if [ -z "${SRC_DIR}" ]; then
+        SRC_DIR=$(find "${DOWNLOAD_DIR}/JMBQ" -maxdepth 2 -type d -name "smali" | head -1)
+    fi
+    
+    # 如果仍然没有找到，尝试在JMBQ根目录下查找
+    if [ -z "${SRC_DIR}" ]; then
+        # 检查JMBQ目录下是否有直接的smali文件
+        if [ -d "${DOWNLOAD_DIR}/JMBQ/smali" ] || [ -n "$(find "${DOWNLOAD_DIR}/JMBQ" -maxdepth 1 -name 'smali*' -type d)" ]; then
+            SRC_DIR="${DOWNLOAD_DIR}/JMBQ"
+        fi
+    fi
+
+    if [ -z "${SRC_DIR}" ]; then
+        echo "错误: MOD 补丁目录中未找到 smali 目录！"
+        echo "检查 JMBQ 目录结构："
+        find "${DOWNLOAD_DIR}/JMBQ" -type f -name "*.smali" | head -10
+        find "${DOWNLOAD_DIR}/JMBQ" -type d | head -20
+        exit 1
+    fi
+
+    echo "找到MOD补丁目录: ${SRC_DIR}"
+    
+    # 3. 复制smali文件
+    # 首先检查目标APK中已存在的最大smali_classes编号
+    local MAX_CLASS_NUM=$(find "${DOWNLOAD_DIR}/DECODE_Output/" -maxdepth 1 -type d -name "smali_classes*" 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
+    MAX_CLASS_NUM=${MAX_CLASS_NUM:-3}
+    local NEW_CLASS_NUM=$((MAX_CLASS_NUM + 1))
+    local NEW_SMALI_DIR="smali_classes${NEW_CLASS_NUM}"
+    
+    echo "目标APK中最大smali_classes编号: ${MAX_CLASS_NUM}"
+    echo "将创建新的smali目录: ${NEW_SMALI_DIR}"
+    
+    # 复制smali文件
+    if [ -d "${SRC_DIR}/smali" ] || [ -n "$(find "${SRC_DIR}" -maxdepth 1 -name 'smali*' -type d)" ]; then
+        # 如果源目录下有明确的smali或smali_classes目录
+        for dir in "${SRC_DIR}"/smali*; do
+            if [ -d "${dir}" ]; then
+                local dir_name=$(basename "${dir}")
+                echo "复制目录: ${dir_name}"
+                cp -r "${dir}" "${DOWNLOAD_DIR}/DECODE_Output/${dir_name}"
+            fi
+        done
+    else
+        # 如果源目录直接包含smali文件
+        echo "复制整个补丁目录到: ${NEW_SMALI_DIR}"
+        mkdir -p "${DOWNLOAD_DIR}/DECODE_Output/${NEW_SMALI_DIR}"
+        
+        # 查找并复制所有.smali文件
+        find "${SRC_DIR}" -name "*.smali" -exec cp --parents {} "${DOWNLOAD_DIR}/DECODE_Output/${NEW_SMALI_DIR}/" \;
+        
+        if [ $? -ne 0 ]; then
+            echo "尝试直接复制整个目录..."
+            cp -r "${SRC_DIR}/." "${DOWNLOAD_DIR}/DECODE_Output/${NEW_SMALI_DIR}/" 2>/dev/null || true
+        fi
+    fi
+    
+    echo "smali文件复制完成"
+
+    # 4. 修改UnityPlayerActivity.smali
+    local SMALI_FILE=$(find "${DOWNLOAD_DIR}/DECODE_Output" -type f -name "UnityPlayerActivity.smali")
+    if [ -z "${SMALI_FILE}" ]; then
+        echo "警告: UnityPlayerActivity.smali 文件未找到，尝试其他名称..."
+        # 尝试其他可能的文件名
+        SMALI_FILE=$(find "${DOWNLOAD_DIR}/DECODE_Output" -type f -name "*Unity*Activity.smali" | head -1)
+        
+        if [ -z "${SMALI_FILE}" ]; then
+            echo "错误: 未找到Unity相关的Activity smali文件！"
+            echo "找到的smali文件："
+            find "${DOWNLOAD_DIR}/DECODE_Output" -type f -name "*.smali" | head -20
+            exit 1
+        fi
+    fi
+    
+    echo "已找到Activity smali文件，路径为: ${SMALI_FILE}"
+
+    # 检查是否已经添加过代码
+    if grep -q "invoke-static {}, Lcom/android/support/Main;->Start()V" "${SMALI_FILE}"; then
+        echo "MOD代码已经添加，跳过修改"
+    else
+        local LINE_NUM=$(grep -n ".method public constructor <init>()V" "${SMALI_FILE}" | cut -d: -f1)
+        if [ -z "${LINE_NUM}" ]; then
+            echo "警告: 未找到构造函数，尝试其他方法..."
+            # 尝试在onCreate方法中添加
+            LINE_NUM=$(grep -n ".method protected onCreate(Landroid/os/Bundle;)V" "${SMALI_FILE}" | cut -d: -f1)
+            
+            if [ -n "${LINE_NUM}" ]; then
+                echo "在onCreate方法中添加代码"
+                sed -i "/\.method protected onCreate(Landroid\/os\/Bundle;)V/,/\.end method/{
+                    /\.locals /a\    invoke-static {}, Lcom/android/support/Main;->Start()V
+                }" "${SMALI_FILE}" || {
+                    echo "错误：添加smali代码失败"
+                    exit 1
+                }
+            else
+                echo "错误：未找到合适的插入点"
+                exit 1
+            fi
+        else
+            echo "在构造函数中添加代码"
+            sed -i "/\.method public constructor <init>()V/,/\.end method/{
+                /\.locals /a\    invoke-static {}, Lcom/android/support/Main;->Start()V
+            }" "${SMALI_FILE}" || {
+                echo "错误：添加smali代码失败，请检查文件路径、权限或文件内容格式。"
+                exit 1
+            }
+        fi
+        echo "smali代码添加成功！"
+    fi
+
+    # 5. 修改 AndroidManifest.xml 文件
+    echo "正在修改 AndroidManifest.xml 文件..."
+    local MANIFEST_FILE="${DOWNLOAD_DIR}/DECODE_Output/AndroidManifest.xml"
+    
+    # 检查是否已经添加过
+    if ! grep -q "com.android.support.Launcher" "${MANIFEST_FILE}"; then
+        sed -i 's#</application>#    <service android:name="com.android.support.Launcher" android:enabled="true" android:exported="false" android:stopWithTask="true"/>\n    </application>\n    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>#' "${MANIFEST_FILE}" || {
+            echo "错误：修改 AndroidManifest.xml 文件失败，请检查文件路径、权限或文件内容格式。"
+            exit 1
+        }
+        echo "AndroidManifest.xml 修改成功！"
+    else
+        echo "AndroidManifest.xml 已经包含MOD服务，跳过修改"
+    fi
+    
     echo "补丁完成。"
 }
 
